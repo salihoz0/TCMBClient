@@ -25,12 +25,6 @@ class TCMBClient {
      * @param {string} baseUrl - API temel URL'si (varsayılan: EVDS API)
      */
     constructor(apiKey, baseUrl = 'https://evds2.tcmb.gov.tr/service/evds') {
-        if (!apiKey) {
-            throw new Error(
-                'API anahtarı gereklidir. https://evds2.tcmb.gov.tr/ adresinden API anahtarınızı alabilirsiniz.'
-            );
-        }
-
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.xmlBaseUrl = 'https://www.tcmb.gov.tr/kurlar';
