@@ -6,6 +6,7 @@
  * @version 1.0.0
  * @description Bu class TCMB'nin EVDS API'sini kullanarak döviz kurları ve diğer ekonomik verileri çeker
  * @requires axios - HTTP istekleri için axios kütüphanesi gereklidir
+ * @requires xml2js - XML verilerini JSON'a dönüştürmek için xml2js kütüphanesi gereklidir
  *
  * KURULUM:
  * npm install axios
@@ -14,25 +15,8 @@
  * <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
  */
 
-// Axios import/require kontrolü
-if (typeof axios === 'undefined') {
-    if (typeof require !== 'undefined') {
-        // Node.js ortamında
-        try {
-            const axios = require('axios');
-            global.axios = axios;
-        } catch (error) {
-            throw new Error(
-                'Axios kütüphanesi bulunamadı. Lütfen "npm install axios" komutu ile yükleyin.'
-            );
-        }
-    } else {
-        // Browser ortamında
-        throw new Error(
-            "Axios kütüphanesi bulunamadı. Lütfen axios CDN'ini sayfanıza ekleyin veya axios.js dosyasını dahil edin."
-        );
-    }
-}
+const xml2js = require('xml2js');
+const axios = require('axios');
 
 class TCMBClient {
     /**
@@ -49,6 +33,7 @@ class TCMBClient {
 
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
+        this.xmlBaseUrl = 'https://www.tcmb.gov.tr/kurlar';
 
         // Seri kodları - Döviz kurları
         this.CURRENCY_CODES = {
@@ -148,21 +133,42 @@ class TCMBClient {
 
         return `${day}-${month}-${year}`;
     }
+    /**
+     * Tarih formatını XML URL formatına dönüştürür (ddMMyyyy)
+     * @param {Date|string} date - Dönüştürülecek tarih
+     * @returns {string} XML URL formatında tarih
+     */
+    formatDateForXml(date) {
+        if (typeof date === 'string') {
+            date = new Date(date);
+        }
 
+        if (!(date instanceof Date) || isNaN(date)) {
+            throw new Error('Geçersiz tarih formatı');
+        }
+
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+
+        return `${day}${month}${year}`;
+    }
     /**
      * HTTP isteği yapar (Axios kullanarak)
      * @param {string} url - İstek URL'si
      * @returns {Promise<Object>} API yanıtı
      */
-    async makeRequest(url) {
+    async makeRequest(url, useApiKey = true) {
         try {
             const response = await axios({
                 method: 'GET',
                 url: url,
-                headers: {
-                    key: this.apiKey,
-                    'Content-Type': 'application/json',
-                },
+                headers: useApiKey
+                    ? {
+                          key: this.apiKey,
+                          'Content-Type': 'application/json',
+                      }
+                    : {},
                 timeout: 30000, // 30 saniye timeout
                 validateStatus: function (status) {
                     return status < 500; // 500'den küçük statusları reject etme
@@ -195,6 +201,20 @@ class TCMBClient {
             throw new Error(`API isteği başarısız: ${error.message}`);
         }
     }
+    /**
+     * XML string'ini parse eder
+     * @param {string} xmlString - XML verisi
+     * @returns {Object} Parse edilmiş XML objesi
+     */
+    async parseXml(xmlString) {
+        const parser = new xml2js.Parser({ explicitArray: false });
+        try {
+            const result = await parser.parseStringPromise(xmlString);
+            return result;
+        } catch (err) {
+            throw new Error('XML parsing error: ' + err.message);
+        }
+    }
 
     /**
      * URL oluşturur
@@ -211,6 +231,18 @@ class TCMBClient {
         });
 
         return `${this.baseUrl}/${queryParams.toString()}`;
+    }
+    /**
+     * XML API URL'si oluşturur
+     * @param {Date|string} date - Tarih
+     * @returns {string} XML API URL'si
+     */
+    buildXmlUrl(date) {
+        const formattedDate = this.formatDateForXml(date);
+        const year = new Date(date).getFullYear();
+        const month = String(new Date(date).getMonth() + 1).padStart(2, '0');
+
+        return `${this.xmlBaseUrl}/${year}${month}/${formattedDate}.xml`;
     }
 
     /**
@@ -246,6 +278,129 @@ class TCMBClient {
 
         const data = await this.makeRequest(url);
         return this.parseExchangeRateData(data, targetCurrencies, formattedDate);
+    }
+    /**
+     * Belirli bir tarihteki TCMB gösterge kurlarını XML API'den getirir (API key gerektirmez)
+     * @param {Date|string} date - Tarih (varsayılan: bugün)
+     * @param {Array<string>} currencies - İstenen para birimleri (varsayılan: tümü)
+     * @param {boolean} includeBoth - Alış ve satış kurlarını dahil et (varsayılan: true)
+     * @returns {Promise<Object>} TCMB gösterge kur bilgileri
+     */
+    async getIndicativeRates(date = new Date(), currencies = null, includeBoth = true) {
+        const targetCurrencies = currencies || Object.keys(this.CURRENCY_CODES);
+        const xmlUrl = this.buildXmlUrl(date);
+        const formattedDate = this.formatDate(date);
+
+        try {
+            const xmlData = await this.makeRequest(xmlUrl, false);
+            const xmlDoc = await this.parseXml(xmlData);
+
+            return this.parseXmlExchangeRateData(
+                xmlDoc,
+                targetCurrencies,
+                formattedDate,
+                includeBoth
+            );
+        } catch (error) {
+            throw new Error(
+                `TCMB gösterge kurları alınamadı: ${error.message}. Hafta sonu, tatil günü veya gelecek tarih olabilir.`
+            );
+        }
+    }
+
+    /**
+     * XML döviz kuru verisini ayrıştırır
+     * @param {Document} xmlDoc - XML dokümanı
+     * @param {Array<string>} currencies - İstenen para birimleri
+     * @param {string} date - Tarih
+     * @param {boolean} includeBoth - Alış ve satış kurlarını dahil et
+     * @returns {Object} Ayrıştırılmış veri
+     */
+    parseXmlExchangeRateData(xmlObj, currencies, date, includeBoth) {
+        const result = {
+            date: date,
+            rates: {},
+            totalCurrencies: currencies.length,
+            source: 'TCMB Gösterge Kurları',
+        };
+
+        // Hata kontrolü (xml2js parse hatası objede farklı olabilir, genelde try-catch ile yapılır)
+        // Burada varsayılan olarak xmlObj yapısını kontrol edelim
+        if (!xmlObj || !xmlObj.Tarih_Date || !xmlObj.Tarih_Date.Currency) {
+            result.error = 'Bu tarih için veri bulunamadı. Hafta sonu veya tatil günü olabilir.';
+            return result;
+        }
+
+        // Currency verileri dizi veya tekil olabilir
+        const currencyArray = Array.isArray(xmlObj.Tarih_Date.Currency)
+            ? xmlObj.Tarih_Date.Currency
+            : [xmlObj.Tarih_Date.Currency];
+
+        // xmlCurrencies objesini oluştur
+        const xmlCurrencies = {};
+        currencyArray.forEach((currencyEl) => {
+            // Kod attribute $ altında
+            const code = currencyEl.$?.Kod || currencyEl.$?.CurrencyCode;
+
+            if (code) {
+                // Elemanlar direkt property olarak varsa al, yoksa boş string
+                const unit = currencyEl.Unit || '1';
+                const forexBuying = currencyEl.ForexBuying || null;
+                const forexSelling = currencyEl.ForexSelling || null;
+                const name = currencyEl.Isim || '';
+
+                xmlCurrencies[code] = {
+                    unit: parseFloat(unit) || 1,
+                    buy: forexBuying ? parseFloat(forexBuying) : null,
+                    sell: forexSelling ? parseFloat(forexSelling) : null,
+                    name: name,
+                };
+            }
+        });
+
+        currencies.forEach((currency) => {
+            if (this.CURRENCY_CODES[currency] && xmlCurrencies[currency]) {
+                const xmlCurrency = xmlCurrencies[currency];
+                let buyRate = xmlCurrency.buy;
+                let sellRate = xmlCurrency.sell;
+
+                // JPY için 100 birim bazında verilmişse direkt kullan
+                if (currency === 'JPY' && xmlCurrency.unit === 100) {
+                    // Değişiklik yok
+                } else if (xmlCurrency.unit > 1) {
+                    // Birim başına düşür
+                    if (buyRate) buyRate = buyRate / xmlCurrency.unit;
+                    if (sellRate) sellRate = sellRate / xmlCurrency.unit;
+                }
+
+                result.rates[currency] = {
+                    name: this.CURRENCY_CODES[currency].name,
+                    code: currency,
+                    buy: buyRate,
+                    sell: includeBoth ? sellRate : undefined,
+                };
+
+                if (!includeBoth) {
+                    delete result.rates[currency].sell;
+                }
+            }
+        });
+
+        return result;
+    }
+
+    /**
+     * XML elementinden text içeriği alır
+     * @param {Element} parentElement - Ana element
+     * @param {string} tagName - Tag adı
+     * @returns {string|null} Text içeriği
+     */
+    getXmlElementText(parentElement, tagName) {
+        const elements = parentElement.getElementsByTagName(tagName);
+        if (elements.length > 0 && elements[0].textContent) {
+            return elements[0].textContent.trim();
+        }
+        return null;
     }
 
     /**

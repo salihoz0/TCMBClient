@@ -19,6 +19,8 @@ API anahtarını almak için:
 4. Açılan menüden **Profil** seçeneğini seçin.
 5. Gelen ekranda **API Anahtarı** düğmesine tıklayarak kişisel anahtarınızı görüntüleyebilirsiniz.
 
+Not: getIndicativeRates fonksiyonu TCMB'nin sunduğu gösterge kurlarını API anahtarı gerektirmeden alır. Diğer tüm fonksiyonlar için API anahtarı zorunludur.
+
 ---
 
 ## Kurulum
@@ -26,11 +28,8 @@ API anahtarını almak için:
 ### Node.js ortamı için
 
 ```bash
-npm install axios
 npm install tcmb-client
 ```
-
-veya sadece axios yüklü ise kendi `tcmb-client.js` dosyanızı projenize dahil edebilirsiniz.
 
 ---
 
@@ -84,6 +83,12 @@ client
     .testConnection()
     .then((isConnected) => console.log('API Bağlantısı:', isConnected ? 'Başarılı' : 'Başarısız'))
     .catch((err) => console.error('Hata:', err.message));
+
+// 8. Gösterge kurlarını alma (yeni eklenen fonksiyon)
+client
+    .getIndicativeRates()
+    .then((data) => console.log('Gösterge Kurları:', data))
+    .catch((err) => console.error('Hata:', err.message));
 ```
 
 ---
@@ -98,6 +103,7 @@ client
 | `getSingleRate(...)`           | Tek para birimi ve türü için (alış/satış) tek kur |
 | `getSupportedCurrencies()`     | Desteklenen para birimlerinin listesini döner     |
 | `testConnection()`             | API bağlantısını test eder                        |
+| `getIndicativeRates()`         | TCMB'nin yayınladığı gösterge kurlarını alır      |
 
 ---
 
