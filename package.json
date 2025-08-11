@@ -19,7 +19,7 @@
         "TCMB Client API"
     ],
     "author": "salihoz0",
-    "license": "ISC",
+    "license": "MIT",
     "description": "",
     "dependencies": {
         "axios": "^1.11.0"
