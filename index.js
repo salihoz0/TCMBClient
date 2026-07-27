@@ -175,6 +175,10 @@ class TCMBClient {
                 );
             }
 
+            if (response.status === 404) {
+                return null;
+            }
+
             if (response.status >= 400) {
                 throw new Error(`HTTP Hatası: ${response.status} - ${response.statusText}`);
             }
@@ -287,6 +291,9 @@ class TCMBClient {
 
         try {
             const xmlData = await this.makeRequest(xmlUrl, false);
+            if (!xmlData) {
+                return null;
+            }
             const xmlDoc = await this.parseXml(xmlData);
 
             return this.parseXmlExchangeRateData(
@@ -296,6 +303,9 @@ class TCMBClient {
                 includeBoth
             );
         } catch (error) {
+            if (error.message && error.message.includes('404')) {
+                return null;
+            }
             throw new Error(
                 `TCMB gösterge kurları alınamadı: ${error.message}. Hafta sonu, tatil günü veya gelecek tarih olabilir.`
             );
